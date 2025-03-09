@@ -17,9 +17,10 @@ from kui.openapi.specification import Info
 from kui.security import bearer_auth
 from loguru import logger
 from typing_extensions import Annotated
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 pyrootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
@@ -28,18 +29,6 @@ from tools.server.exception_handler import ExceptionHandler
 from tools.server.model_manager import ModelManager
 from tools.server.views import routes
 
-
-class ChunkIdMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # 元のレスポンスを取得
-        response = await call_next(request)
-        
-        # X-Request-chunk-idヘッダーがあれば、それをレスポンスヘッダーにも設定
-        chunk_id = request.headers.get('X-Request-chunk-id')
-        if chunk_id:
-            response.headers['X-Request-chunk-id'] = chunk_id
-            
-        return response
 
 class API(ExceptionHandler):
     def __init__(self):
@@ -80,12 +69,9 @@ class API(ExceptionHandler):
                 Exception: self.other_exception_handler,
             },
             factory_class=FactoryClass(http=MsgPackRequest),
-            cors_config=CORSConfig(),
+            cors_config=CORSConfig(expose_headers=["X-Request-chunk-id"]),  # X-Request-chunk-idヘッダーを露出
         )
         
-        # Add ChunkIdMiddleware
-        self.app.add_middleware(ChunkIdMiddleware)
-
         # Add the state variables
         self.app.state.lock = Lock()
         self.app.state.device = self.args.device
@@ -93,6 +79,34 @@ class API(ExceptionHandler):
 
         # Associate the app with the model manager
         self.app.on_startup(self.initialize_app)
+        
+        # Wrap the original app with middleware
+        original_app = self.app
+        
+        async def wrapper(scope, receive, send):
+            # X-Request-chunk-idヘッダーを処理
+            if scope["type"] == "http":
+                chunk_id = None
+                for name, value in scope.get("headers", []):
+                    if name.decode("latin1").lower() == "x-request-chunk-id":
+                        chunk_id = value.decode("latin1")
+                        break
+                
+                async def send_with_chunk_id(message):
+                    if message["type"] == "http.response.start" and chunk_id:
+                        headers = message.get("headers", [])
+                        headers.append((b"x-request-chunk-id", chunk_id.encode("latin1")))
+                        message["headers"] = headers
+                    await send(message)
+                
+                await original_app(scope, receive, send_with_chunk_id)
+            else:
+                await original_app(scope, receive, send)
+        
+        # ライフサイクルメソッドを保持するためのラッパー
+        self.app = wrapper
+        self.app.on_startup = original_app.on_startup
+        self.app.state = original_app.state
 
     async def initialize_app(self, app: Kui):
         # Make the ModelManager available to the views
