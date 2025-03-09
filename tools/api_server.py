@@ -29,6 +29,9 @@ from tools.server.views import routes
 class API(ExceptionHandler):
     def __init__(self):
         self.args = parse_args()
+        # Set default workers to 4 if not provided
+        if not hasattr(self.args, 'workers') or self.args.workers is None:
+            self.args.workers = 4
         self.routes = routes
 
         def api_auth(endpoint):
