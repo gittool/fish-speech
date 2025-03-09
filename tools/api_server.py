@@ -17,6 +17,9 @@ from kui.openapi.specification import Info
 from kui.security import bearer_auth
 from loguru import logger
 from typing_extensions import Annotated
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 pyrootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
@@ -25,6 +28,18 @@ from tools.server.exception_handler import ExceptionHandler
 from tools.server.model_manager import ModelManager
 from tools.server.views import routes
 
+
+class ChunkIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # 元のレスポンスを取得
+        response = await call_next(request)
+        
+        # X-Request-chunk-idヘッダーがあれば、それをレスポンスヘッダーにも設定
+        chunk_id = request.headers.get('X-Request-chunk-id')
+        if chunk_id:
+            response.headers['X-Request-chunk-id'] = chunk_id
+            
+        return response
 
 class API(ExceptionHandler):
     def __init__(self):
@@ -67,6 +82,9 @@ class API(ExceptionHandler):
             factory_class=FactoryClass(http=MsgPackRequest),
             cors_config=CORSConfig(),
         )
+        
+        # Add ChunkIdMiddleware
+        self.app.add_middleware(ChunkIdMiddleware)
 
         # Add the state variables
         self.app.state.lock = Lock()
