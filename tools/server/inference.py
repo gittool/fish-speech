@@ -19,7 +19,10 @@ def inference_wrapper(req: ServeTTSRequest, engine: TTSInferenceEngine):
         match result.code:
             case "header":
                 if isinstance(result.audio, tuple):
-                    yield result.audio[1]
+                    yield {
+                        "audio": result.audio[1],
+                        "chunk_id": req.chunk_id,  # クライアントに同じchunk_idを返す
+                    }
 
             case "error":
                 raise HTTPException(
@@ -30,12 +33,18 @@ def inference_wrapper(req: ServeTTSRequest, engine: TTSInferenceEngine):
             case "segment":
                 count += 1
                 if isinstance(result.audio, tuple):
-                    yield (result.audio[1] * AMPLITUDE).astype(np.int16).tobytes()
+                    yield {
+                        "audio": (result.audio[1] * AMPLITUDE).astype(np.int16).tobytes(),
+                        "chunk_id": req.chunk_id,  # クライアントに同じchunk_idを返す
+                    }
 
             case "final":
                 count += 1
                 if isinstance(result.audio, tuple):
-                    yield result.audio[1]
+                    yield {
+                        "audio": result.audio[1],
+                        "chunk_id": req.chunk_id,  # クライアントに同じchunk_idを返す
+                    }
                 return None  # Stop the generator
 
     if count == 0:

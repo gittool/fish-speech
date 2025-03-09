@@ -117,6 +117,7 @@ class ModelManager:
             repetition_penalty=1.2,
             temperature=0.7,
             format="wav",
+            chunk_id=None,  # chunk_idパラメーターを追加
         )
         list(inference(request, tts_inference_engine))
         logger.info("Models warmed up.")
